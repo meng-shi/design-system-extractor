@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Design System Extractor</title>
+    <style>
+      :root { color: #172214; font-family: ui-sans-serif, system-ui, sans-serif; }
+      body { margin: 0; width: 340px; background: #f5f2e9; }
+      main { padding: 16px; }
+      h1 { margin: 0 0 4px; font-size: 1rem; }
+      p.sub { margin: 0 0 14px; color: #63754f; font-size: .75rem; }
+      button.primary { width: 100%; min-height: 40px; border: 0; border-radius: 9px; background: #334d24; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+      button.primary:disabled { opacity: .6; cursor: wait; }
+      .status { min-height: 16px; margin: 10px 0; color: #536b39; font-size: .78rem; font-weight: 600; }
+      .summary { display: none; }
+      .row { display: flex; justify-content: space-between; font-size: .78rem; padding: 6px 0; border-bottom: 1px solid #e6e2d8; }
+      .row span:last-child { color: #66715d; }
+      .swatches { display: flex; gap: 6px; margin: 10px 0; }
+      .swatches i { flex: 1; height: 26px; border: 1px solid #0001; border-radius: 6px; }
+      .downloads { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 12px; }
+      .downloads button { min-height: 34px; border: 1px solid #d8d4c6; border-radius: 7px; background: #fffcf5; font: inherit; font-size: .72rem; cursor: pointer; }
+      .downloads button:hover { border-color: #819668; background: #f7faef; }
+      .downloads button.all { grid-column: 1 / -1; background: #eef3e4; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Design System Extractor</h1>
+      <p class="sub">Runs on this page — nothing leaves your device.</p>
+      <button id="extract" class="primary">Extract this page</button>
+      <p id="status" class="status"></p>
+      <div id="summary" class="summary">
+        <div class="swatches" id="swatches"></div>
+        <div class="row"><span>Tokens</span><span id="stat-tokens">—</span></div>
+        <div class="row"><span>Animated elements</span><span id="stat-motion">—</span></div>
+        <div class="row"><span>Built with</span><span id="stat-stack">—</span></div>
+        <div class="downloads" id="downloads"></div>
+      </div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

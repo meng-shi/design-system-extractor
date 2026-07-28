@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Design System Extractor</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Design evidence, made reusable</p>
+        <h1>Extract a website’s<br /><em>design system.</em></h1>
+        <p class="lede">Paste a public URL. We analyze its rendered pages and return portable tokens for people and AI.</p>
+      </header>
+
+      <section class="extract-card" aria-labelledby="extract-title">
+        <h2 id="extract-title">Analyze a public website</h2>
+        <form id="extract-form">
+          <label for="url">Website URL</label>
+          <div class="form-row">
+            <input id="url" name="url" type="url" placeholder="https://example.com" required />
+            <button type="submit">Extract system <span>→</span></button>
+          </div>
+          <div class="options">
+            <label for="pages">Pages to sample</label>
+            <select id="pages" name="pages">
+              <option value="1">Homepage only</option>
+              <option value="3" selected>Homepage + 2 pages</option>
+              <option value="5">Homepage + 4 pages</option>
+              <option value="6">Up to 6 pages</option>
+            </select>
+            <label for="method">Method</label>
+            <select id="method" name="method">
+              <option value="rendered" selected>Rendered (high fidelity, slower)</option>
+              <option value="static">Static CSS (fast, edge-ready)</option>
+            </select>
+            <p>Public HTTP(S) sites only. Rendered launches a browser; Static just fetches HTML + CSS.</p>
+          </div>
+        </form>
+      </section>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+      <section id="results" hidden aria-live="polite"></section>
+    </main>
+    <template id="download-template">
+      <a class="download" download><span class="file-name"></span><span>Download ↓</span></a>
+    </template>
+    <script src="/app.js"></script>
+  </body>
+</html>
