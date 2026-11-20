@@ -3,6 +3,30 @@ const status = document.querySelector('#status');
 const results = document.querySelector('#results');
 const submit = form.querySelector('button');
 const downloadTemplate = document.querySelector('#download-template');
+const methodSelect = document.querySelector('#method');
+const methodHelp = document.querySelector('#method-help');
+
+async function loadConfig() {
+  try {
+    const response = await fetch('/api/config');
+    if (!response.ok) return;
+    const config = await response.json();
+    if (!config.staticOnly) return;
+    const rendered = methodSelect.querySelector('option[value="rendered"]');
+    if (rendered) {
+      rendered.disabled = true;
+      rendered.textContent = 'Rendered (unavailable on this deployment)';
+    }
+    methodSelect.value = 'static';
+    if (methodHelp) {
+      methodHelp.textContent = 'This deployment uses static CSS extraction: fast, no browser. Public HTTP(S) sites only.';
+    }
+  } catch {
+    // Keep the default UI if the config endpoint is unavailable.
+  }
+}
+
+void loadConfig();
 
 function tokenValues(group) {
   return Object.entries(group || {}).filter(([, value]) => value && value.$value);
@@ -68,7 +92,9 @@ form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const body = Object.fromEntries(new FormData(form));
   body.pages = Number(body.pages);
-  status.textContent = 'Rendering pages and extracting design evidence…';
+  status.textContent = body.method === 'static'
+    ? 'Fetching HTML and CSS, then extracting design evidence…'
+    : 'Rendering pages and extracting design evidence…';
   results.hidden = true;
   submit.disabled = true;
   try {

@@ -3,7 +3,8 @@
  *
  *   npm run spike -- https://stripe.com --pages 5
  */
-import { extractDesignSystem, normalizeUrl } from './extract.js';
+import { extractDesignSystem } from './extract.js';
+import { normalizeUrl } from './urlSafety.js';
 
 const MAX_PAGES_DEFAULT = 4;
 

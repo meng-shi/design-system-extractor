@@ -5,6 +5,7 @@ import { chromium, type Browser, type Page } from 'playwright';
 
 import { collectInPage, type PageCollection } from './collector.js';
 import { type ExportSummary } from './exporter.js';
+import { assertSafeUrlResolved, normalizeUrl } from './urlSafety.js';
 import { exportDesignSystem } from './writeBundle.js';
 
 const MAX_PAGES_DEFAULT = 4;
@@ -20,26 +21,6 @@ export interface ExtractionResult {
   sourceUrl: string;
   pageUrls: string[];
   summary: ExportSummary;
-}
-
-export function normalizeUrl(input: string): string {
-  return /^https?:\/\//i.test(input) ? input : `https://${input}`;
-}
-
-export function assertSafeUrl(url: string): void {
-  const parsed = new URL(url);
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    throw new Error('Only HTTP and HTTPS URLs can be extracted.');
-  }
-  const hostname = parsed.hostname.toLowerCase();
-  const privateIpv4 =
-    /^127\./.test(hostname) ||
-    /^10\./.test(hostname) ||
-    /^192\.168\./.test(hostname) ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
-  if (hostname === 'localhost' || hostname === '::1' || privateIpv4) {
-    throw new Error('Local and private network URLs cannot be extracted.');
-  }
 }
 
 /** Ensure lazy-loaded, below-the-fold styles are realized before sampling. */
@@ -73,6 +54,7 @@ async function loadAndCollect(page: Page, url: string): Promise<PageCollection |
 
 /** Pick same-origin, content-looking links from the landing page. */
 async function discoverLinks(page: Page, origin: string, limit: number): Promise<string[]> {
+  if (limit <= 0) return [];
   const hrefs = await page.evaluate(() =>
     Array.from(document.querySelectorAll('a[href]')).map((a) => (a as HTMLAnchorElement).href),
   );
@@ -116,7 +98,7 @@ export async function extractDesignSystem(
   { maxPages = MAX_PAGES_DEFAULT, outputDir, onProgress }: ExtractionOptions,
 ): Promise<ExtractionResult> {
   const sourceUrl = normalizeUrl(inputUrl);
-  assertSafeUrl(sourceUrl);
+  await assertSafeUrlResolved(sourceUrl);
   const origin = new URL(sourceUrl).origin;
   const aggregate: PageCollection = {
     colors: [],

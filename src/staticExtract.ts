@@ -8,33 +8,108 @@ import postcss, { type Declaration, type Rule } from 'postcss';
 import { parse as parseHtml } from 'node-html-parser';
 
 import type { PageCollection } from './collector.js';
+import { assertSafeUrlResolved } from './urlSafety.js';
 
-const FETCH_TIMEOUT_MS = 15_000;
+const FETCH_TIMEOUT_MS = 12_000;
 const MAX_BYTES = 4_000_000;
+const MAX_TOTAL_BYTES = 8_000_000;
 const MAX_STYLESHEETS = 12;
+const MAX_REDIRECTS = 5;
+const STYLESHEET_CONCURRENCY = 4;
+const DEFAULT_BUDGET_MS = 45_000;
+const MAX_DECLARATIONS = 80_000;
 
-async function fetchText(url: string): Promise<string | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      redirect: 'follow',
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (compatible; DesignSystemExtractor/0.2; +https://example.com/bot)',
-        Accept: 'text/html,text/css,*/*',
-      },
-    });
-    if (!response.ok) return null;
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength > MAX_BYTES) return null;
-    return new TextDecoder().decode(buffer);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
+interface JobBudget {
+  bytes: number;
+  deadline: number;
+  declarations: number;
+}
+
+function remaining(budget: JobBudget): number {
+  return budget.deadline - Date.now();
+}
+
+async function fetchText(url: string, budget: JobBudget): Promise<string | null> {
+  if (remaining(budget) <= 0 || budget.bytes >= MAX_TOTAL_BYTES) return null;
+
+  let current = url;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    const timeLeft = remaining(budget);
+    if (timeLeft <= 0) return null;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.min(FETCH_TIMEOUT_MS, timeLeft));
+    try {
+      await assertSafeUrlResolved(current);
+      const response = await fetch(current, {
+        signal: controller.signal,
+        redirect: 'manual',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (compatible; DesignSystemExtractor/0.2; +https://github.com/meng-shi/design-system-extractor)',
+          Accept: 'text/html,text/css,*/*',
+        },
+      });
+
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get('location');
+        if (!location) return null;
+        current = new URL(location, current).href;
+        continue;
+      }
+      if (!response.ok) return null;
+
+      const declared = Number(response.headers.get('content-length') || 0);
+      if (declared && (declared > MAX_BYTES || budget.bytes + declared > MAX_TOTAL_BYTES)) {
+        return null;
+      }
+
+      let buffer: Uint8Array;
+      if (response.body) {
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let received = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+          received += value.byteLength;
+          if (received > MAX_BYTES || budget.bytes + received > MAX_TOTAL_BYTES) {
+            await reader.cancel();
+            return null;
+          }
+          chunks.push(value);
+        }
+        buffer = Buffer.concat(chunks);
+      } else {
+        buffer = new Uint8Array(await response.arrayBuffer());
+        if (buffer.byteLength > MAX_BYTES || budget.bytes + buffer.byteLength > MAX_TOTAL_BYTES) {
+          return null;
+        }
+      }
+
+      budget.bytes += buffer.byteLength;
+      return new TextDecoder().decode(buffer);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
   }
+
+  return null;
+}
+
+async function mapLimit<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let index = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const item = items[index];
+      index += 1;
+      await worker(item);
+    }
+  });
+  await Promise.all(runners);
 }
 
 interface ParsedHtml {
@@ -109,7 +184,8 @@ function extractColorFromBackground(value: string): string | undefined {
   return match ? match[0] : undefined;
 }
 
-function collectCss(cssText: string, collection: PageCollection): void {
+function collectCss(cssText: string, collection: PageCollection, budget: JobBudget): void {
+  if (budget.declarations >= MAX_DECLARATIONS) return;
   let root;
   try {
     root = postcss.parse(cssText);
@@ -118,8 +194,11 @@ function collectCss(cssText: string, collection: PageCollection): void {
   }
 
   root.walkRules((rule: Rule) => {
+    if (budget.declarations >= MAX_DECLARATIONS) return;
     const decls: Record<string, string> = {};
     rule.walkDecls((decl: Declaration) => {
+      if (budget.declarations >= MAX_DECLARATIONS) return;
+      budget.declarations += 1;
       const prop = decl.prop.toLowerCase();
       const value = decl.value.trim();
       decls[prop] = value;
@@ -208,8 +287,14 @@ export interface StaticExtractionResult {
   title: string;
 }
 
+export interface StaticExtractionOptions {
+  /** Total time budget for fetching and parsing, in milliseconds. */
+  budgetMs?: number;
+}
+
 /** Pick same-origin, content-looking links, mirroring the rendered crawler. */
 function pickInternalLinks(links: string[], origin: string, limit: number): string[] {
+  if (limit <= 0) return [];
   const seen = new Set<string>();
   const picks: string[] = [];
   for (const href of links) {
@@ -233,8 +318,14 @@ export async function extractStatic(
   sourceUrl: string,
   maxPages: number,
   onProgress?: (message: string) => void,
+  options: StaticExtractionOptions = {},
 ): Promise<StaticExtractionResult> {
   const origin = new URL(sourceUrl).origin;
+  const budget: JobBudget = {
+    bytes: 0,
+    deadline: Date.now() + (options.budgetMs ?? DEFAULT_BUDGET_MS),
+    declarations: 0,
+  };
   const collection: PageCollection = {
     colors: [],
     backgrounds: [],
@@ -255,23 +346,25 @@ export async function extractStatic(
 
   const ingestPage = async (pageUrl: string): Promise<string[]> => {
     onProgress?.(`Fetching ${pageUrl}`);
-    const html = await fetchText(pageUrl);
+    const html = await fetchText(pageUrl, budget);
     if (!html) return [];
     const parsed = parsePage(html, pageUrl);
     collection.title ||= parsed.title;
     collection.generator ||= parsed.generator;
     collection.scriptSources.push(...parsed.scriptSources);
     collection.domMarkers.push(...parsed.domMarkers);
-    for (const css of parsed.inlineStyles) collectCss(css, collection);
+    for (const css of parsed.inlineStyles) collectCss(css, collection, budget);
 
     const sheets = parsed.stylesheetHrefs
       .filter((href) => !fetchedStylesheets.has(href))
       .slice(0, MAX_STYLESHEETS);
-    for (const href of sheets) {
-      fetchedStylesheets.add(href);
-      const cssText = await fetchText(href);
-      if (cssText) collectCss(cssText, collection);
-    }
+    for (const href of sheets) fetchedStylesheets.add(href);
+
+    await mapLimit(sheets, STYLESHEET_CONCURRENCY, async (href) => {
+      const cssText = await fetchText(href, budget);
+      if (cssText) collectCss(cssText, collection, budget);
+    });
+
     pageUrls.push(pageUrl);
     return parsed.links;
   };
@@ -281,7 +374,9 @@ export async function extractStatic(
     throw new Error('The requested page could not be fetched. It may be unavailable or block automated requests.');
   }
 
-  for (const link of pickInternalLinks(homeLinks, origin, Math.max(0, maxPages - 1))) {
+  const extraPages = pickInternalLinks(homeLinks, origin, Math.max(0, maxPages - 1));
+  for (const link of extraPages) {
+    if (remaining(budget) <= 0) break;
     await ingestPage(link);
   }
 

@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: design-system-extractor
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm ci --include=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: STATIC_ONLY
+        value: "1"
+      - key: SKIP_PLAYWRIGHT
+        value: "1"
+      - key: MAX_CONCURRENT
+        value: "1"
+      - key: RATE_LIMIT_MAX
+        value: "6"
